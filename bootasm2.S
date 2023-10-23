@@ -43,6 +43,29 @@ cons_writeline:
     call    cons_write_crlf
     ret    
 
+read_sector_number:
+    xor     %cx, %cx            # CX register will hold the sector number
+    xor     %dx, %dx            # DX register will be used to store individual digits
+read_character:
+    mov     $0x0, %ah
+    int     $0x16               # BIOS read character
+    cmp     $0x0D, %al          # Check if 'Enter' was pressed
+    je      done_reading
+    cmp     $0x30, %al          # Check if character is below '0'
+    jb      read_character
+    cmp     $0x39, %al          # Check if character is above '9'
+    ja      read_character
+    sub     $0x30, %al          # Convert from ASCII to integer
+    mov     %ax, %dx
+    imul    $10, %cx, %cx       # Multiply current number by 10
+    add     %dx, %cx            # Add new digit
+    jmp     read_character
+done_reading:
+
+
+call    read_sector_number
+
+
 real_start:
     movb    %dl, (boot_device) # Boot device number is passed in DL from BIOS. Save it hear since DL might get trashed
 
@@ -65,6 +88,10 @@ harddrive:
 finish:
     call    cons_writeline
 
+movw    $prompt_message, %si
+call    cons_writeline
+
+
 endless_loop:                   # Loop forever more
     jmp     endless_loop    
 
@@ -79,4 +106,5 @@ booted_from_msg:
     .string "Booting from "
 fd: .string "floppy disk"
 hd: .string "hard drive"
-
+prompt_message:
+    .string "Enter the sector number to read: "
