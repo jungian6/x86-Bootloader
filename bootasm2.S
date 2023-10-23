@@ -46,6 +46,15 @@ cons_writeline:
 read_sector_number:
     xor     %cx, %cx            # CX register will hold the sector number
     xor     %dx, %dx            # DX register will be used to store individual digits
+
+    # Get the current cursor position
+    mov     $0x03, %ah          # AH = 3, get cursor position function
+    mov     $0x00, %bh          # BH = 0, page number
+    int     $0x10               # Call video interrupt
+    # DH = row, DL = column, save them for later use
+    mov     %dh, %ch            # CH = original row
+    mov     %dl, %cl            # CL = original column
+
 read_character:
     mov     $0x0, %ah
     int     $0x16               # BIOS read character
@@ -55,13 +64,24 @@ read_character:
     jb      read_character
     cmp     $0x39, %al          # Check if character is above '9'
     ja      read_character
-    sub     $0x30, %al          # Convert from ASCII to integer
-    mov     %ax, %dx
-    imul    $10, %cx, %cx       # Multiply current number by 10
-    add     %dx, %cx            # Add new digit
-    jmp     read_character
-done_reading:
 
+    # Echo the character back to the screen
+    movb    $0x0e, %ah          # Teletype output function
+    int     $0x10               # BIOS video interrupt, AL already contains the character
+
+    # Convert from ASCII to integer and update CX
+    sub     $0x30, %al          # Convert from ASCII
+    imul    $10, %cx, %cx       # Multiply current number by 10
+    add     %al, %cl            # Add new digit to CX (lower 8 bits)
+
+    jmp     read_character      # Repeat the process
+
+
+
+done_reading:
+    # Your logic here
+
+    ret                         # Return from the function
 
 call    read_sector_number
 
@@ -88,8 +108,23 @@ harddrive:
 finish:
     call    cons_writeline
 
+# Print the prompt
 movw    $prompt_message, %si
-call    cons_writeline
+call    cons_write  # not cons_writeline, because we don't want a newline this time
+
+# Get the current cursor position
+mov     $0x03, %ah          # AH = 3, get cursor position function
+mov     $0x00, %bh          # BH = 0, page number
+int     $0x10               # Call video interrupt
+# Save current position
+mov     %dh, %ch            # CH = original row
+mov     %dl, %cl            # CL = original column
+
+# Now, CL contains the column number where the cursor is after printing the prompt.
+# You don't need to change it because you want to start input right after the prompt.
+# Proceed to read characters and echo them back as you were doing.
+ call    read_sector_number 
+
 
 
 endless_loop:                   # Loop forever more
