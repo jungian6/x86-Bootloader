@@ -79,9 +79,157 @@ read_character:
 
 
 done_reading:
-    # Your logic here
+    # Set up the parameters for the int $0x13 call
+    mov     $0x02, %ah          # AH = 2, read sector function
+    mov     %cx, %ax            # AL = number of sectors to read (1 in this case)
+    xor     %bx, %bx            # BX = buffer address (0x0000 for offset)
+    mov     $0x8000, %ax
+    mov     %ax, %es
+    movb    (boot_device), %dl  # DL = drive number
 
-    ret                         # Return from the function
+    # Set CH, CL, and DH for the int 0x13 call
+    xor     %dh, %dh            # DH = head number (0 for simplicity)
+    mov     %cx, %ax            # Copy sector number to AX
+    and     $0xFF, %al          # AL = sector number (lower 8 bits)
+    mov     %al, %cl            # Move sector number to CL
+    shr     $8, %ah            # Shift right 8 bits to get upper 8 bits of sector number
+    and     $0x03, %ah          # Mask all but the lower 2 bits
+    mov     %ah, %ch            # Move to CH (upper 2 bits of sector number)
+
+    int     $0x13               # Call disk interrupt
+
+
+    mov     $0x8000, %si        # SI points to the start of the buffer
+    mov     $512, %cx           # 512 bytes in a sector
+    xor     %bx, %bx            # BX will hold the offset
+
+display_loop:
+    # Display the offset at the start of each line
+    push    %cx                 # Save CX
+    mov     %cx, %bx            # Move the offset to CX for display
+    call    display_word_hex    # Display BX (offset) in hexadecimal
+    movb    $0x20, %al          # Space character
+    mov     $0x0E, %ah          # Teletype output function
+    int     $0x10               # BIOS video interrupt
+    pop     %cx                 # Restore CX
+
+    # Display 16 bytes per line
+    mov     $16, %bp            # Counter for 16 bytes per line
+line_loop:
+    lodsb                       # Load byte at SI into AL and increment SI
+    call    display_byte_hex    # Display AL in hexadecimal
+    dec     %bp                 # Decrement BP
+    jz      newline             # If BP reaches 0, print a newline and continue with the next line
+    movb    $0x20, %al          # Space character
+    mov     $0x0E, %ah          # Teletype output function
+    int     $0x10               # BIOS video interrupt
+    inc     %bx                 # Increment the offset
+    loop    line_loop           # Repeat for all bytes in the line
+
+newline:
+    # Print a newline
+    call    cons_write_crlf
+    inc     %di                 # Increment line counter
+    cmp     $16, %di            # Check if 16 lines have been displayed
+    jne     display_loop        # If not, continue with the next line
+
+    # Pause after 16 lines
+    movw    $pause_message, %si
+    call    cons_write          # Display "Press any key to continue..."
+    call    wait_for_key        # Wait for a key press
+    call    clear_line          # Clear the "Press any key to continue..." message
+    xor     %di, %di            # Reset line counter
+    jmp     display_loop        # Continue with the next set of lines
+
+wait_for_key:
+    xor     %ah, %ah
+    int     $0x16               # BIOS read character
+    ret
+
+clear_line:
+    # Clear the current line (assuming 80 columns)
+    mov     $0x20, %al          # Space character
+    mov     $80, %cx            # Number of columns
+clear_loop:
+    mov     $0x0E, %ah          # Teletype output function
+    int     $0x10               # BIOS video interrupt
+    loop    clear_loop
+    ret
+
+pause_message:
+    .string "Press any key to continue..."
+
+display_word_hex:
+    push    %ax                 # Save AX
+    shr     $8, %al             # Shift right 8 bits to get the high byte
+    call    display_byte_hex    # Display the high byte in hexadecimal
+    pop     %ax                 # Restore AX
+    and     $0x00FF, %ax        # Mask the high byte to get the low byte
+    call    display_byte_hex    # Display the low byte in hexadecimal
+    ret
+
+
+read_error:
+    # Display error code
+    mov     %ah, %al            # Move the error code to AL
+    call    display_byte_hex    # Display the error code in hexadecimal
+
+    # Check specific error codes and display appropriate messages
+    cmp     $0x01, %ah          # Invalid function or parameter
+    je      display_invalid_function_msg
+    cmp     $0x02, %ah          # Address mark not found
+    je      display_address_mark_msg
+    cmp     $0x03, %ah          # Disk write-protected
+    je      display_write_protected_msg
+    cmp     $0x04, %ah          # Sector not found/read error
+    je      display_sector_not_found_msg
+    cmp     $0x0A, %ah          # Bad sector flag detected
+    je      display_bad_sector_msg
+    # ... Add more error codes as needed
+
+    # Default error message
+    movw    $read_error_msg, %si
+    call    cons_writeline
+    ret
+
+display_invalid_function_msg:
+    movw    $invalid_function_msg, %si
+    jmp     cons_writeline
+display_address_mark_msg:
+    movw    $address_mark_msg, %si
+    jmp     cons_writeline
+display_write_protected_msg:
+    movw    $write_protected_msg, %si
+    jmp     cons_writeline
+display_sector_not_found_msg:
+    movw    $sector_not_found_msg, %si
+    jmp     cons_writeline
+display_bad_sector_msg:
+    movw    $bad_sector_msg, %si
+    jmp     cons_writeline
+
+
+display_byte_hex:
+    # Display the byte in AL in hexadecimal format
+    push    %ax                 # Save AX
+    shr     $4, %al             # Shift right 4 bits to get the high nibble
+    call    display_nibble_hex  # Display the high nibble
+    pop     %ax                 # Restore AX
+    and     $0x0F, %al          # Mask the high nibble to get the low nibble
+    call    display_nibble_hex  # Display the low nibble
+    ret
+
+display_nibble_hex:
+    # Display the 4-bit value in AL in hexadecimal format
+    cmp     $0xA, %al           # Check if AL is 10 or greater
+    jl      display_digit       # If less, it's a digit
+    add     $7, %al             # Convert 10-15 to 'A'-'F'
+display_digit:
+    add     $0x30, %al          # Convert 0-9 to '0'-'9'
+    # Display AL
+    mov     $0x0E, %ah          # Teletype output function
+    int     $0x10               # BIOS video interrupt
+    ret
 
 call    read_sector_number
 
@@ -132,9 +280,22 @@ endless_loop:                   # Loop forever more
 
 # Program data
 
+invalid_function_msg:
+    .string "Invalid function or parameter."
+address_mark_msg:
+    .string "Address mark not found."
+write_protected_msg:
+    .string "Disk is write-protected."
+sector_not_found_msg:
+    .string "Sector not found or read error."
+bad_sector_msg:
+    .string "Bad sector detected."
+
 boot_device:
     .byte   0
 
+read_error_msg:
+    .string "Error reading sector. Please try again."
 boot_message:     
     .string "Boot Loader Stage 2 loaded"             
 booted_from_msg:
