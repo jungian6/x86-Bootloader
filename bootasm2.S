@@ -95,6 +95,20 @@ finish:
 endless_loop:                   # Loop forever more
     jmp     endless_loop    
 
+
+# Displays the current offset
+display_offset:
+    shr     $8, %ax            # Get the high byte of the offset to AH
+    mov     %ah, %al          # Move AH to AL
+    call    display_byte_hex   # Display the high byte
+
+    mov     %cl, %al           # Get the low byte of the offset
+    call    display_byte_hex   # Display the low byte
+
+    call    print_space        # Print a space character
+    ret
+
+
 read_sector:
     movb    $0x10, %ah                  # Reset disk system
     int     $0x13
@@ -114,24 +128,33 @@ read_sector:
     jc      read_failed
     ret
 
-# Displays the contents of the sector at 0xD000 in hexadecimal
+# Displays the contents of the sector at 0xD000 in hexadecimal format
 display_sector:
-    movw    $0xD000, %si
-    movb    $0x80, %cl                   # 128 iterations (since we print 2 bytes at a time)
+    movw    $0xD000, %si        # Starting address of the sector
+    movw    $0x0000, %cx        # Offset counter
 
-display_loop:
+display_outer_loop:
+    call    display_offset     # Display the current offset
+    movb    $0x10, %bh         # Number of bytes to display per line
+
+display_inner_loop:
     movb    (%si), %al
-    call    display_byte_hex             # Display byte in hex
-    inc     %si
-    movb    (%si), %al
-    call    display_byte_hex             # Display byte in hex
-    inc     %si
+    call    display_byte_hex   # Display the current byte in hex
+    call    print_space        # Print a space character
+    inc     %si                # Point to the next byte
+    dec     %bh                # Decrement the byte counter for this line
+    jz      new_line           # If we've displayed 16 bytes, move to a new line
 
-    dec     %cl
-    jz      done_display
-    jmp     display_loop
+    jmp     display_inner_loop
 
-done_display:
+new_line:
+    call    cons_write_crlf    # Move to a new line
+    add     $0x10, %cx         # Increase the offset by 16
+    cmp     $0x100, %cx        # Check if we've displayed all 256 bytes
+    jz      done_display_sector
+    jmp     display_outer_loop
+
+done_display_sector:
     ret
 
 # Displays a byte in hexadecimal
@@ -163,6 +186,12 @@ print_char:
     movb    $0x0e, %ah
     int     $0x10
     ret
+
+print_space:
+    movb    $0x20, %al
+    call    print_char
+    ret
+
 
 # Program data
 
