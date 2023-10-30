@@ -132,6 +132,8 @@ read_sector:
 display_sector:
     movw    $0xD000, %si        # Starting address of the sector
     movw    $0x0000, %cx        # Offset counter
+    movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
+
 
 display_outer_loop:
     call    display_offset     # Display the current offset
@@ -148,13 +150,53 @@ display_inner_loop:
     jmp     display_inner_loop
 
 new_line:
-    call    cons_write_crlf    # Move to a new line
+    movw    %di, %si            # Point SI to the start of the 16 bytes we've just displayed
+    call    display_ascii       # Display ASCII values
+    call    cons_write_crlf     # Move to a new line
+    add     $0x10, %di          # Move DI to next 16 bytes
+
     add     $0x10, %cx         # Increase the offset by 16
     cmp     $0x100, %cx        # Check if we've displayed all 256 bytes
     jz      done_display_sector
     jmp     display_outer_loop
-
 done_display_sector:
+    ret
+
+# Displays ASCII representation of the byte
+display_ascii:
+    movb    $0x10, %bh         # Number of bytes to display
+
+display_ascii_loop:
+    movb    (%si), %al
+    
+    # Check for specific non-printable characters
+    cmp     $0x00, %al          # Check for NULL character
+    je      non_printable
+    cmp     $0x1F, %al          # Check for control characters
+    jbe     non_printable       # Jump if AL is below or equal to 0x1F
+    cmp     $0x7F, %al          # Check for DEL character and extended ASCII range
+    jae     non_printable       # Jump if AL is above or equal to 0x7F
+
+    # Print the ASCII character
+    movb    %al, %ah
+    movb    $0x0e, %ah
+    int     $0x10
+    jmp     ascii_done
+
+non_printable:
+    # Display an underscore for non-printable characters
+    movb    $0x5F, %al         # ASCII for underscore
+    movb    %al, %ah
+    movb    $0x0e, %ah
+    int     $0x10
+
+ascii_done:
+    inc     %si                # Move to the next byte
+    dec     %bh                # Decrement the byte counter
+    jz      done_ascii         # If we've displayed 16 characters, we are done
+    jmp     display_ascii_loop
+
+done_ascii:
     ret
 
 # Displays a byte in hexadecimal
