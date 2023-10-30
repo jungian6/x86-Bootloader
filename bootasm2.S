@@ -56,6 +56,16 @@ read_failed:
     # For simplicity, I'm making it loop indefinitely here.
     jmp     read_failed
 
+wait_for_enter:
+    movb    $0x00, %ah
+    int     $0x16              # Check for a keystroke
+    cmp     $0x0D, %al         # Compare with ASCII code for Enter
+    jz      done_waiting       # If Enter is pressed, exit
+    jmp     wait_for_enter     # Otherwise, keep waiting
+
+done_waiting:
+    ret
+
 
 real_start:
     movb    %dl, (boot_device) # Boot device number is passed in DL from BIOS. Save it here since DL might get trashed
@@ -78,6 +88,9 @@ harddrive:
 device_name:
     call    cons_writeline
 
+    # Display message indicating contents of sector 0
+    movw    $sector_contents_msg, %si
+    call    cons_writeline
     call    cons_write_crlf     # Add a newline
 
     # Read the sector 0 into memory at 0xD000
@@ -87,6 +100,7 @@ device_name:
     call    display_sector
 
     jmp     endless_loop    
+
 
 
 finish:
@@ -134,6 +148,7 @@ display_sector:
     movw    $0x0000, %cx        # Offset counter
     movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
 
+    movb    $0x0, %bh           # Initialize the line counter to 0
 
 display_outer_loop:
     call    display_offset     # Display the current offset
@@ -153,14 +168,32 @@ new_line:
     movw    %di, %si            # Point SI to the start of the 16 bytes we've just displayed
     call    display_ascii       # Display ASCII values
     call    cons_write_crlf     # Move to a new line
-    add     $0x10, %di          # Move DI to next 16 bytes
+    inc     %bl                # Increment the line counter
 
+    cmp     $0x10, %bl          # Check if 16 lines have been displayed
+    jnz     not_16_lines       # If not, skip the prompt
+    
+    movw    $continue_prompt, %si
+    call    cons_writeline      # Display the "Press Enter to continue" message
+    call    wait_for_enter      # Wait for the Enter key to be pressed
+    movb    $0x0, %bl           # Reset the line counter to 0
+
+    add     $0x10, %di          # Move DI to next 16 bytes
     add     $0x10, %cx         # Increase the offset by 16
-    cmp     $0x100, %cx        # Check if we've displayed all 256 bytes
+    cmp     $0x200, %cx        # Check if we've displayed all 512 bytes of the sector
+    jnz     display_outer_loop # If not, go back to display_outer_loop
+
+not_16_lines:
+    add     $0x10, %di          # Move DI to next 16 bytes
+    add     $0x10, %cx         # Increase the offset by 16
+    cmp     $0x200, %cx        # Check if we've displayed all 512 bytes of the sector
     jz      done_display_sector
     jmp     display_outer_loop
+
 done_display_sector:
     ret
+
+
 
 # Displays ASCII representation of the byte
 display_ascii:
@@ -174,8 +207,6 @@ display_ascii_loop:
     je      non_printable
     cmp     $0x1F, %al          # Check for control characters
     jbe     non_printable       # Jump if AL is below or equal to 0x1F
-    cmp     $0x7F, %al          # Check for DEL character and extended ASCII range
-    jae     non_printable       # Jump if AL is above or equal to 0x7F
 
     # Print the ASCII character
     movb    %al, %ah
@@ -195,6 +226,7 @@ ascii_done:
     dec     %bh                # Decrement the byte counter
     jz      done_ascii         # If we've displayed 16 characters, we are done
     jmp     display_ascii_loop
+
 
 done_ascii:
     ret
@@ -239,10 +271,15 @@ print_space:
 
 boot_device:
     .byte   0
-
 boot_message:     
     .string "Boot Loader Stage 2 loaded"             
 booted_from_msg:
     .string "Booting from "
 fd: .string "floppy disk"
 hd: .string "hard drive"
+
+continue_prompt:
+    .string "Press Enter to continue"
+sector_contents_msg:
+    .string "Contents of sector 0"
+
