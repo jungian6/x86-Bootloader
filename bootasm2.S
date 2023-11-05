@@ -62,17 +62,23 @@ wait_for_enter:
  
 real_start:
     movb    %dl, (boot_device) # Boot device number is passed in DL from BIOS. Save it here since DL might get trashed
- 
+    
     movw    $boot_message, %si  # Display our boot message
+
     call    cons_writeline
- 
+
     movw    $booted_from_msg, %si
+
     call    cons_write
- 
+
     movb    (boot_device), %dl
+
     cmp     $0x80, %dl
+
     jge     harddrive
+
     movw    $fd, %si
+
     jmp     device_name
  
 harddrive:
@@ -103,15 +109,15 @@ endless_loop:                   # Loop forever more
  
 # Displays the current offset
 display_offset:
-    shr     $8, %ax            # Get the high byte of the offset to AH
-    mov     %ah, %al          # Move AH to AL
-    call    display_byte_hex   # Display the high byte
- 
-    mov     %cl, %al           # Get the low byte of the offset
-    call    display_byte_hex   # Display the low byte
- 
-    call    print_space        # Print a space character
+    push    %cx                           # Save CX
+    mov     %ch, %al                      # Move high byte of CX to AL for display
+    call    display_byte_hex              # Display the high byte
+    mov     %cl, %al                      # Move low byte of CX to AL for display
+    call    display_byte_hex              # Display the low byte
+    call    print_space                   # Print a space character
+    pop     %cx                           # Restore CX
     ret
+
  
 
 enter_sector_number:
@@ -119,22 +125,18 @@ enter_sector_number:
     call    cons_writeline
     call    wait_for_enter
     ret
- 
+
 read_sector:
     movb    $0x10, %ah                 # Reset disk system
     int     $0x13
  
-    # Set up the disk address packet to read sector 0
     movw    $0x1, disk_address_packet+2  # Number of sectors to read = 1
  
-    # Buffer Segment:Offset = 0x0000:disk_read_buffer
     movw    $0x0000, disk_address_packet+6  # Segment = 0x0000
     movw    $disk_read_buffer, %ax
     movw    %ax, disk_address_packet+4      # Offset
  
-    # xorl    %eax, %eax                     # LBA = 0
-
-    movl    $0x1, %eax                   # LBA = 1
+    movl    $0x0, %eax                   # LBA = 1
 
     movl    %eax, disk_address_packet+8   # LBA = 0
  
@@ -156,79 +158,61 @@ add_sixteen:
 
     addw    $0x100, %dx          # Increment %dx by 256
 
-    # addw    %dx, %si            # Add the value of %bx to the starting address of the sector
-
     addw    $0x100, %si          # Increment %bx by 256
 
-    movw    $0x0000, %cx        # Offset counter
     movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
 
     jmp display_outer_loop
  
- 
+ pause_for_enter:
+    movw    $continue_prompt, %si   # Load the prompt message
+    call    cons_writeline          # Display the prompt
+    call    wait_for_enter          # Wait for Enter to be pressed
+    ret
  
 # Displays the contents of the sector at 0xD000 in hexadecimal format
 display_sector:
-
     movw    $disk_read_buffer, %si        # Starting address of the sector
+    movw    %si, %di                      # DI will be used to remember the start of the 16 bytes for ASCII display
+    xor     %cx, %cx                      # Clear CX to use as offset counter
+    xor     %dx, %dx                      # Clear DX to use as line counter
 
-    # addw    $0x80, %bx          # Increment %bx by 16
-
-    # addw    %bx, %si            # Add the value of %bx to the starting address of the sector
-
-    # addw    $0x20, %si          # Increment %bx by 16
-
-    movw    $0x0000, %cx        # Offset counter
-    movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
- 
- 
 display_outer_loop:
-    call    display_offset     # Display the current offset
-    movb    $0x10, %bh         # Number of bytes to display per line
- 
+    call    display_offset                # Display the current offset
+    movb    $0x10, %bh                    # Number of bytes to display per line
+
 display_inner_loop:
     movb    (%si), %al
-    call    display_byte_hex   # Display the current byte in hex
-    call    print_space        # Print a space character
-    inc     %si                # Point to the next byte
-    dec     %bh                # Decrement the byte counter for this line
-    jz      new_line           # If we've displayed 16 bytes, move to a new line
- 
+    call    display_byte_hex              # Display the current byte in hex
+    call    print_space                   # Print a space character
+    inc     %si                           # Point to the next byte
+    dec     %bh                           # Decrement the byte counter for this line
+    jz      new_line                      # If we've displayed 16 bytes, move to a new line
     jmp     display_inner_loop
- 
+
 new_line:
-    movw    %di, %si            # Point SI to the start of the 16 bytes we've just displayed
-    call    display_ascii       # Display ASCII values
-    call    cons_write_crlf     # Move to a new line
-    
+    call    display_ascii                 # Display ASCII values
+    call    cons_write_crlf               # Move to a new line
+    inc     %dx                           # Increment the line counter
+    add     $0x10, %cx                    # Increment the offset by 16 for the next line display
+    cmp     $0x10, %dx                    # Check if 16 lines have been displayed
+    jne     update_di_and_continue        # If not, just update DI and continue
 
-    add    $0x10, %bl          # Increment %bl by 16
+    call    pause_for_enter               # Wait for Enter to be pressed to continue
+    xor     %dx, %dx                      # Reset the line counter after pausing
 
-    cmp     $0x100, %bl          # Check if 16 lines have been displayed
-    jnz     not_16_lines       # If not, skip the prompt
-    # jz      add_sixteen        # If so, add 16 to %bx
-
-    cmp    $0x100, %dx         # Check if 256 bytes have been displayed
-    jz     done_display_sector  # If all 512 displayed, done
-
-    movw    $continue_prompt, %si
-    call    cons_writeline      # Display the "Press Enter to continue" message
-    call    wait_for_enter      # Wait for the Enter key to be pressed
-    jmp     add_sixteen
-
-not_16_lines:
-    add     $0x10, %di          # Move DI to next 16 bytes
-    add     $0x10, %cx         # Increase the offset by 16
-    
-    cmp    $0x200, %dx         # Check if 512 bytes have been displayed
-    jz     done_display_sector  # If all 512 displayed, done
-    jmp    display_outer_loop
+update_di_and_continue:
+    movw    %di, %si                      # Restore SI from DI for the next line
+    addw    $0x10, %di                    # Move DI to the next line
+    cmpw    $0x0200, %cx                  # Check if 512 bytes have been displayed
+    jz      done_display_sector           # If all 512 displayed, done
+    jmp     display_outer_loop
 
 done_display_sector:
     # Display sector finished message to the user
     movw    $sector_displayed_msg, %si
     call    cons_writeline
-    jmp     device_name
+    ret
  
 # Displays ASCII representation of the byte
 display_ascii:
@@ -303,7 +287,6 @@ print_space:
  
  
 # Program data
- 
 boot_device:
     .byte   0
  
