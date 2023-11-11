@@ -66,6 +66,7 @@ real_start:
     cmp     $0x80, %dl
     jge     harddrive
     movw    $fd, %si
+
     jmp     device_name
 
 harddrive:
@@ -73,18 +74,11 @@ harddrive:
 
 device_name:
     call    cons_writeline
-
     call    cons_write_crlf     # Add a newline
-
-    call    new_str      # Wait for Enter key press
-
-    call    cons_write_crlf     # Add a newline
-
-    # Read the sector 0 into memory at 0xD000
-    call    read_sector
-
-    # Display contents of the sector
-    call    display_sector
+    call    new_str             # Wait for Enter key press
+    call    cons_write_crlf     # Add a newline                            
+    call    read_sector         # Read the sector 0 into memory at 0xD000
+    call    display_sector      # Display contents of the sector
 
     jmp     endless_loop    
 
@@ -107,26 +101,16 @@ display_offset:
     call    print_space     # Print a space character
     ret
 
-sector_to_read:
-    movw    $sector_to_read_prompt, %si
-    call    cons_writeline      # Display the "Press Enter to continue" message
-    movb    $0x00, %ah        # Function 00h: Wait for a keypress
-    int     $0x16              # Call BIOS keyboard interrupt
-    cmpb    $0x0D, %al        # Compare AL with the Enter key ASCII code
-    jnz     sector_to_read     # If not Enter, wait again
-    # Read the sector 0 into memory at 0xD000
-    call    read_sector
-
-    # Display contents of the sector
-    call    display_sector
-
-    jmp     endless_loop
-
 new_str:
     # Point DX to the start of the buffer
-    movw    %si, %bx
+    # movw    %si, %bx
+
+    movw    $input_buffer, %bx   # Point BX to the start of the input buffer
 
     xor     %cx, %cx        # Clear cl register to use for counting characters
+
+    movw    $sector_input_prompt, %si
+    call    cons_write      # Display the "Press Enter to continue" message
 
     jmp    new_sector_to_read
 
@@ -165,24 +149,57 @@ new_sector_to_read:
     jmp     new_sector_to_read
 
 backspace_handling:
-    # Check is at the start of the buffer
-    cmp     %si, %bx
-    je      new_sector_to_read      # If so, wait for another character
+    # Check if at the start of the buffer
+    cmp     $input_buffer, %bx
+    je      new_sector_to_read      # If at start, no backspace handling
 
-    # Move cursor back
-    movb    $0x0E, %ah
-    movb    $0x08, %al
-    int     $0x10
+    # Move the cursor back
+    movb    $0x08, %al              # Load backspace character into AL
+    movb    $0x0E, %ah              # Teletype output function
+    int     $0x10                   # Output backspace
 
-    # Print space to erase the character
-    movb    $0x20, %al
-    int     $0x10
+    # Print space to overwrite the character
+    movb    $0x20, %al              # Load space character into AL
+    int     $0x10                   # Output space
+
+    # Move cursor back again after overwriting with space
+    movb    $0x08, %al              # Load backspace character into AL
+    int     $0x10                   # Output backspace again to go back to original position
 
     # Move the buffer pointer back
     dec     %bx                     # Decrement the buffer pointer
-    dec     %cl                     # Decrement the counter
+    dec     %cx                     # Decrement the counter
+    movb    $0, (%bx)               # Null-terminate the string at the new end
+    jmp     new_sector_to_read
+
+
 
 finish_sector_to_read:
+    movb    $0, (%bx)   # Null-terminate the input buffer after the last digit
+    # movw    $input_buffer, (%bx)   # Reset BX to the start of the input buffer
+    call    cons_write_crlf     # Add a newline
+    call    read_sector
+    call    display_sector
+
+starting_sector_conversion:
+    movw    $input_buffer, %si   # Point SI to the start of the input buffer
+
+    xorl    %eax, %eax           # Clear EAX register to use for conversion
+    xorl    %ecx, %ecx           # Clear ECX register to use for conversion
+
+input_conversion_loop:
+    movb    (%si), %cl           # Move the first character to CL
+    inc     %si                  # Increment SI
+    testb   %cl, %cl             # Check if the character is NULL
+    jz      sector_conversion_done # If so, we are done
+
+    subb    $'0', %cl            # Convert the character to a number
+    imull   $10, %eax            # Multiply the current number by 10
+    addl    %ecx, %eax           # Add the current number to the total
+    jmp     input_conversion_loop
+
+sector_conversion_done:
+    movl    %eax, starting_sector           # Move the sector number to starting_sector
     ret
 
 read_sector:
@@ -192,8 +209,10 @@ read_sector:
     # Set up the disk address packet to read sector 0
     movw    $0x1, disk_address_packet+2  # Number of sectors to read = 1
     movw    $0xD000, disk_address_packet+4 # Buffer address = 0xD000
-    # xorl    %eax, %eax
-    movl    $0x0, %eax
+
+    call   starting_sector_conversion
+
+    movl    starting_sector, %eax
     movl    %eax, disk_address_packet+8   # LBA = 0
 
 
@@ -207,6 +226,7 @@ read_sector:
 
 # Routine to wait for Enter key press
 wait_for_enter:
+    call    cons_write_crlf     # Add a newline
     movw    $continue_prompt, %si
     call    cons_writeline      # Display the "Press Enter to continue" message
     movb    $0x00, %ah          # Function 00h: Wait for a keypress
@@ -247,12 +267,7 @@ new_line:
     je      prompt_once
     cmp     $0x20, %bx           # Check if 32 lines have been displayed
     je      done_display_sector  # If yes, go to end message
-    call    display_next
-
-    # pusha                    # Save registers
-    # call wait_for_enter      # Wait for Enter key press
-    # popa                     # Restore registers
-    # xor %bx, %bx             # Reset line counter after Enter is pressed
+    jmp     display_next
 
 prompt_once:
     push    %si                  # Save SI, DI, and CX before the prompt
@@ -272,7 +287,7 @@ display_next:
 done_display_sector:
     movw   $sector_finsihed_prompt, %si
     call   cons_writeline
-    jmp    sector_to_read
+    jmp    new_str
     ret
 
 
@@ -359,6 +374,9 @@ booted_from_msg:
 fd: .string "floppy disk"
 hd: .string "hard drive"
 
+sector_input_prompt:
+    .string "Enter sector number to read: "
+
 continue_prompt:
     .string "Press Enter to continue"
 
@@ -367,3 +385,9 @@ sector_finsihed_prompt:
 
 sector_to_read_prompt:
     .string "Enter sector number to read: (press enter to read sector 0)"
+
+input_buffer:
+    .space  5                    # Reserve 5 bytes for input buffer
+
+starting_sector:
+    .long   0
