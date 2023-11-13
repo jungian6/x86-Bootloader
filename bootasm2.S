@@ -102,9 +102,6 @@ display_offset:
     ret
 
 new_str:
-    # Point DX to the start of the buffer
-    # movw    %si, %bx
-
     movw    $input_buffer, %bx   # Point BX to the start of the input buffer
 
     xor     %cx, %cx        # Clear cl register to use for counting characters
@@ -384,7 +381,7 @@ sector_finsihed_prompt:
     .string "Fully read sector successfully!"
 
 sector_to_read_prompt:
-    .string "Enter sector number to read: (press enter to read sector 0)"
+    .string "Enter sector the number of sectors to read:"
 
 input_buffer:
     .space  5                    # Reserve 5 bytes for input buffer
