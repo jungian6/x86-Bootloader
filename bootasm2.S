@@ -1,3 +1,7 @@
+# When the PC starts, the processor is essentially emulating an 8086 processor, i.e. 
+# a 16-bit processor.  So our initial boot loader code is 16-bit code that will 
+# eventually switch the processor into 32-bit mode.
+
 # This code is linked to assume a starting address of 0x7C00 which is where the BIOS
 # will load a boot segment.
 
@@ -66,7 +70,6 @@ real_start:
     cmp     $0x80, %dl
     jge     harddrive
     movw    $fd, %si
-
     jmp     device_name
 
 harddrive:
@@ -74,10 +77,6 @@ harddrive:
 
 device_name:
     call    cons_writeline
-
-    call    cons_write_crlf     # Add a newline
-
-    call    new_str      # Wait for Enter key press
 
     call    cons_write_crlf     # Add a newline
 
@@ -108,149 +107,7 @@ display_offset:
     call    print_space     # Print a space character
     ret
 
-new_str:
-    # Point DX to the start of the buffer
-    # movw    %si, %bx
 
-    movw    $input_buffer, %bx   # Point BX to the start of the input buffer
-
-    xor     %cx, %cx        # Clear cl register to use for counting characters
-
-    movw    $sector_input_prompt, %si
-    call    cons_write      # Display the "Press Enter to continue" message
-
-    call    new_sector_to_read
-
-    movb    $0, (%bx)   # Null-terminate the input buffer after the last digit
-    # movw    $input_buffer, (%bx)   # Reset BX to the start of the input buffer
-
-    call    cons_write_crlf     # Add a newline
-
-    call    ask_num_of_sectors
-
-    movb    $0, (%bx)   # Null-terminate the input buffer after the last digit
-
-    call    cons_write_crlf     # Add a newline
-
-    call    read_sector
-    call    display_sector
-
-ask_num_of_sectors:
-
-    movw    $num_sector_buffer, %bx   # Point BX to the start of the input buffer
-
-    xor     %cx, %cx        # Clear cl register to use for counting characters
-
-    movw    $num_of_sectors_prompt, %si
-    call    cons_write      
-
-    call    new_sector_to_read
-
-    movw    $num_sector_buffer, %bx   # Reset BX to the start of the input buffer
-    # call    cons_write_crlf     # Add a newline
-    # call    all_inputs_finished
-
-    ret
-
-    
-
-new_sector_to_read:
-    movb    $0x00, %ah      # Function 00h: Wait for a keypress
-    int     $0x16           # Call BIOS keyboard interrupt
-    
-
-    # Check if 'Enter' key is presed (0x0D)
-    cmpb    $0x0D, %al
-    je      finish_sector_to_read
-
-    # Check if 'Backspace' key is pressed (0x08)
-    cmpb    $0x08, %al
-    je      backspace_handling
-
-    # Check if the character is a digit
-    cmp     $'0', %al               # Check if the character is a digit lower than '0'
-    jl      new_sector_to_read      # If so, wait for another character
-    cmp     $'9', %al               # Check if the character is a digit higher than '9'
-    jg      new_sector_to_read      # If so, wait for another character
-
-    # Check if 4 characters have been entered
-    cmp     $4, %cx
-    jge     new_sector_to_read      # If so, wait for enter or backspace
-
-    # Echo the character to the screen
-    movb    $0x0E, %ah              # Function 0eh: Write character in AL to screen
-    int     $0x10                   # Call BIOS video interrupt
-
-    # Store the character in the buffer
-    movb    %al, (%bx)              # Store the character in the buffer
-    inc     %bx                     # Increment the buffer pointer
-    inc     %cx                     # Increment the counter
-
-    jmp     new_sector_to_read
-
-backspace_handling:
-    # Check if at the start of the buffer
-    cmp     $input_buffer, %bx
-    je      new_sector_to_read      # If at start, no backspace handling
-
-    # Move the cursor back
-    movb    $0x08, %al              # Load backspace character into AL
-    movb    $0x0E, %ah              # Teletype output function
-    int     $0x10                   # Output backspace
-
-    # Print space to overwrite the character
-    movb    $0x20, %al              # Load space character into AL
-    int     $0x10                   # Output space
-
-    # Move cursor back again after overwriting with space
-    movb    $0x08, %al              # Load backspace character into AL
-    int     $0x10                   # Output backspace again to go back to original position
-
-    # Move the buffer pointer back
-    dec     %bx                     # Decrement the buffer pointer
-    dec     %cx                     # Decrement the counter
-    movb    $0, (%bx)               # Null-terminate the string at the new end
-    jmp     new_sector_to_read
-
-finish_sector_to_read:
-    ret
-    
-
-all_inputs_finished:
-    call    read_sector
-    call    display_sector
-
-convert_num_of_sectors:
-    movw    $num_sector_buffer, %si   # Point SI to the start of the input buffer
-
-    xorl    %eax, %eax           # Clear EAX register to use for conversion
-    xorl    %ecx, %ecx           # Clear ECX register to use for conversion
-
-    call    input_conversion_loop
-    movl    %eax, num_of_sectors           # Move the sector number to num_of_sectors
-
-starting_sector_conversion:
-    movw    $input_buffer, %si   # Point SI to the start of the input buffer
-
-    xorl    %eax, %eax           # Clear EAX register to use for conversion
-    xorl    %ecx, %ecx           # Clear ECX register to use for conversion
-
-    call    input_conversion_loop
-    movl    %eax, starting_sector           # Move the sector number to starting_sector
-
-input_conversion_loop:
-    movb    (%si), %cl           # Move the first character to CL
-    inc     %si                  # Increment SI
-    testb   %cl, %cl             # Check if the character is NULL
-    jz      sector_conversion_done # If so, we are done
-
-    subb    $'0', %cl            # Convert the character to a number
-    imull   $10, %eax            # Multiply the current number by 10
-    addl    %ecx, %eax           # Add the current number to the total
-    jmp     input_conversion_loop
-
-sector_conversion_done:
-    ret
 
 read_sector:
     movb    $0x10, %ah                  # Reset disk system
@@ -259,10 +116,7 @@ read_sector:
     # Set up the disk address packet to read sector 0
     movw    $0x1, disk_address_packet+2  # Number of sectors to read = 1
     movw    $0xD000, disk_address_packet+4 # Buffer address = 0xD000
-
-    call   starting_sector_conversion
-
-    movl    starting_sector, %eax
+    movl    $0x0, %eax                   # LBA = 1
     movl    %eax, disk_address_packet+8   # LBA = 0
 
 
@@ -274,36 +128,25 @@ read_sector:
     jc      read_failed
     ret
 
-# Routine to wait for Enter key press
-wait_for_enter:
-    call    cons_write_crlf     # Add a newline
-    movw    $continue_prompt, %si
-    call    cons_writeline      # Display the "Press Enter to continue" message
-    movb    $0x00, %ah          # Function 00h: Wait for a keypress
-    int     $0x16               # Call BIOS keyboard interrupt
-    cmpb    $0x0D, %al          # Compare AL with the Enter key ASCII code
-    jnz     wait_for_enter      # If not Enter, wait again
-    ret
-
-# Modify the display_sector routine to call wait_for_enter every 16 lines
+# Displays the contents of the sector at 0xD000 in hexadecimal format
+# Modification in display_sector to add a line counter and a different message after 32 lines
 display_sector:
-    movw    $0xD000, %si        # Starting address of the sector
-    movw    num_of_sectors, %cx    # Get the number of sectors
-    movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
-    xor     %bx, %bx            # BX will count the number of lines displayed
+    movw    $0xD000, %si          # Starting address of the sector
+    movw    $0x0000, %cx          # Offset counter
+    movw    %si, %di              # DI will be used to remember the start of the 16 bytes for ASCII display
+    xor     %bx, %bx              # Clear BX, BX will be our line counter
 
 display_outer_loop:
-    call    display_offset      # Display the current offset
-    movb    $0x10, %bh          # Number of bytes to display per line
+    call    display_offset       # Display the current offset
+    movb    $0x10, %bh           # Number of bytes to display per line
 
 display_inner_loop:
     movb    (%si), %al
-    call    display_byte_hex   # Display the current byte in hex
-    call    print_space        # Print a space character
-    inc     %si                # Point to the next byte
-    dec     %bh                # Decrement the byte counter for this line
-    jz      new_line           # If we've displayed 16 bytes, move to a new line
-
+    call    display_byte_hex     # Display the current byte in hex
+    call    print_space          # Print a space character
+    inc     %si                  # Point to the next byte
+    dec     %bh                  # Decrement the byte counter for this line
+    jz      new_line             # If we've displayed 16 bytes, move to a new line
     jmp     display_inner_loop
 
 new_line:
@@ -311,45 +154,60 @@ new_line:
     call    display_ascii        # Display ASCII values
     call    cons_write_crlf      # Move to a new line
     add     $0x10, %di           # Move DI to next 16 bytes
+
     add     $0x10, %cx           # Increase the offset by 16
     inc     %bx                  # Increment line counter
-    cmp     $0x10, %bx           # Check if 16 lines have been displayed
-    je      prompt_once
-    cmp     $0x20, %bx           # Check if 32 lines have been displayed
-    je      done_display_sector  # If yes, go to end message
-    jmp     display_next
+    cmp     $0x10, %bx           # Compare if 16 lines are displayed
+    je      prompt_once          # If 16 lines, prompt once
+    cmp     $0x20, %bx           # Compare if 32 lines are displayed
+    je      display_end_message  # If 32 lines, display end message
+    jmp     check_end_sector     # If not, continue
 
 prompt_once:
     push    %si                  # Save SI, DI, and CX before the prompt
     push    %di
     push    %cx
-    call    wait_for_enter      # Call the routine to prompt user
+    call    prompt_continue      # Call the routine to prompt user
     pop     %cx                  # Restore SI, DI, and CX after the prompt
     pop     %di
     pop     %si
-    jmp     display_next         # Continue with the display after prompt
+    jmp     check_end_sector     # Continue with the display after prompt
 
-display_next:
-    cmp     $0x200, %cx          # Check if we've displayed all 512 bytes   --- CHECKS THAT ALL LINES HAVE BEEN DISPLAYED
-    jz      all_sectors_displayed
+display_end_message:
+    movw    $sector_end_msg, %si # Load the message's address
+    call    cons_write           # Display the message
+    call    cons_write_crlf      # Move cursor to the next line
+    jmp     check_end_sector     # Continue with the display after message
+
+check_end_sector:
+    cmp     $0x200, %cx         # Check if we've displayed all 512 bytes (a sector's worth)
+    jz      done_display_sector
     jmp     display_outer_loop
 
-
-all_sectors_displayed:
-    # Decrement num_of_sectors and check if it's zero
-    dec     num_of_sectors
-    jz      done_display_sector  # If zero, we are done displaying all sectors
-
-    # Otherwise, read and display the next sector
-    inc     starting_sector      # Increment the starting sector for the next read
-    call    read_sector          # Read the next sector
-    call    display_sector       # Display the sector
-    jmp     display_sector       # Repeat the display process for the new sector
-
 done_display_sector:
-    movw    $sector_finsihed_prompt, %si
-    call    cons_writeline
-    jmp     new_str
+    ret
+
+
+# Additional code for prompt_continue
+prompt_continue:
+    movw    $press_enter_msg, %si  # Load the message's address
+    call    cons_write             # Display the message
+    call    cons_write_crlf        # Move cursor to the next line
+    call    wait_for_enter         # Wait for the user to press Enter
+    ret
+
+# Routine to wait for the user to press Enter
+wait_for_enter:
+    xor     %ax, %ax               # Clear AX register
+    int     $0x16                  # BIOS keyboard service
+    cmp     $0x1C, %ah             # Check if Enter (0x1C) was pressed
+    je      wait_for_enter_done    # If Enter was pressed, return
+    jmp     wait_for_enter         # Otherwise, keep waiting
+
+wait_for_enter_done:
+    ret
+
+
 
 # Displays ASCII representation of the byte
 display_ascii:
@@ -424,6 +282,13 @@ print_space:
 
 # Program data
 
+sector_end_msg:
+    .string "Sector fully displayed"
+
+# Message to prompt user
+press_enter_msg:
+    .string "Press enter to continue..."
+
 boot_device:
     .byte   0
 
@@ -433,27 +298,3 @@ booted_from_msg:
     .string "Booting from "
 fd: .string "floppy disk"
 hd: .string "hard drive"
-
-sector_input_prompt:
-    .string "Enter sector number to read: "
-
-num_of_sectors_prompt:
-    .string "Enter number of sectors to read: "
-
-continue_prompt:
-    .string "Press Enter to continue"
-
-sector_finsihed_prompt:
-    .string "Fully read sector successfully!"
-
-num_sector_buffer:
-    .space  5                    # Reserve 5 bytes for number of sector buffer
-
-input_buffer:
-    .space  5                    # Reserve 5 bytes for input buffer
-
-num_of_sectors:
-    .long   0
-
-starting_sector:
-    .long   0
