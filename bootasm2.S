@@ -77,7 +77,7 @@ device_name:
 
     call    cons_write_crlf     # Add a newline
 
-    call    input_prompts      # Asks for inputs from user
+    call    input_prompts       # Asks for inputs from user
 
     call    cons_write_crlf     # Add a newline
 
@@ -99,13 +99,13 @@ endless_loop:                   # Loop forever more
 
 # Displays the current offset
 display_offset:
-    push    %cx             # Save CX register
-    mov     %ch, %al        # Move the high byte of CX into AL
-    call    display_byte_hex # Display the high byte
-    mov     %cl, %al        # Move the low byte of CX into AL
-    call    display_byte_hex # Display the low byte
-    pop     %cx             # Restore CX register
-    call    print_space     # Print a space character
+    push    %cx                 # Save CX register
+    mov     %ch, %al            # Move the high byte of CX into AL
+    call    display_byte_hex    # Display the high byte
+    mov     %cl, %al            # Move the low byte of CX into AL
+    call    display_byte_hex    # Display the low byte
+    pop     %cx                 # Restore CX register
+    call    print_space         # Print a space character
     ret
 
 input_prompts:
@@ -126,10 +126,10 @@ input_prompts:
 ask_starting_sector:
     movw    $input_buffer, %bx   # Point BX to the start of the input buffer
 
-    xor     %cx, %cx        # Clear cl register to use for counting characters
+    xor     %cx, %cx             # Clear cl register to use for counting characters
 
     movw    $sector_input_prompt, %si
-    call    cons_write      # Display the "Enter sector number to read: " message
+    call    cons_write           # Display the "Enter sector number to read: " message
     
 
     call    inputs_handling  # Handles inputs
@@ -144,7 +144,7 @@ ask_num_of_sectors:
 
     movw    $num_sector_buffer, %bx   # Point BX to the start of the input buffer
 
-    xor     %cx, %cx        # Clear cl register to use for counting characters
+    xor     %cx, %cx                    # Clear cl register to use for counting characters
 
     movw    $num_of_sectors_prompt, %si
     call    cons_write      
@@ -172,13 +172,13 @@ inputs_handling:
 
     # Check if the character is a digit
     cmp     $'0', %al               # Check if the character is a digit lower than '0'
-    jl      inputs_handling      # If so, wait for another character
+    jl      inputs_handling         # If so, wait for another character
     cmp     $'9', %al               # Check if the character is a digit higher than '9'
-    jg      inputs_handling      # If so, wait for another character
+    jg      inputs_handling         # If so, wait for another character
 
     # Check if 4 characters have been entered
     cmp     $4, %cx
-    jge     inputs_handling      # If so, wait for enter or backspace
+    jge     inputs_handling         # If so, wait for enter or backspace
 
     # Echo the character to the screen
     movb    $0x0E, %ah              # Function 0eh: Write character in AL to screen
@@ -194,7 +194,7 @@ inputs_handling:
 backspace_handling:
     # Check if at the start of the buffer
     cmp     $input_buffer, %bx
-    je      inputs_handling      # If at start, no backspace handling
+    je      inputs_handling         # If at start, no backspace handling
 
     # Move the cursor back
     movb    $0x08, %al              # Load backspace character into AL
@@ -217,20 +217,21 @@ backspace_handling:
 
 finish_sector_to_read:
     ret
-    
-
-all_inputs_finished:
-    call    read_sector
-    call    display_sector
 
 convert_num_of_sectors:
-    movw    $num_sector_buffer, %si   # Point SI to the start of the input buffer
+    movw    $num_sector_buffer, %si # Point SI to the start of the input buffer
 
-    xorl    %eax, %eax           # Clear EAX register to use for conversion
-    xorl    %ecx, %ecx           # Clear ECX register to use for conversion
+    xorl    %eax, %eax              # Clear EAX register to use for conversion
+    xorl    %ecx, %ecx              # Clear ECX register to use for conversion
 
     call    input_conversion_loop
-    movl    %eax, num_of_sectors           # Move the sector number to num_of_sectors
+    movl    %eax, num_of_sectors    # Move the sector number to num_of_sectors
+
+    # If num_of_sectors is 0, call invalid_sector
+    cmp     $0, num_of_sectors
+    je      invalid_sector
+
+
 
 starting_sector_conversion:
     movw    $input_buffer, %si   # Point SI to the start of the input buffer
@@ -255,27 +256,86 @@ input_conversion_loop:
 sector_conversion_done:
     ret
 
-read_sector:
-    movb    $0x10, %ah                  # Reset disk system
-    int     $0x13
+# Output the 16-bit value in BX to the screen has a 4 digit hex value	
+#
+# Input:  BX = Value to output	
 
-    # Set up the disk address packet to read sector 0
-    movw    $0x1, disk_address_packet+2  # Number of sectors to read = 1
-    movw    $0xD000, disk_address_packet+4 # Buffer address = 0xD000
+HexChars:	.ascii "0123456789ABCDEF"
 
-    
-    movl    starting_sector, %eax
-    movl    %eax, disk_address_packet+8   # LBA = 0
+# Output the value passed on the stack to the screen using the specified base
+#
 
+#define     number      6
+#define     base        4
 
-    movb    $0x42, %ah                    # Read disk sectors
-    movb    (boot_device), %dl
-    leaw    disk_address_packet, %si
-    int     $0x13
+#define     endofstring -2
 
-    jc      read_failed
+cons_write_number:
+    pushw   %bp                 # Save existing frame pointer
+    movw    %sp, %bp            # Setup our frame pointer
+    subw    $18, %sp            # Reserve space for our string buffer
+    pushw   %ax                 # Save the registers we will trash
+    pushw   %bx
+    pushw   %cx
+    pushw   %dx
+    pushw   %si
+    pushw   %di
+
+    movw    %bp, %si
+    subw    $3, %si
+    movb    $0, endofstring(%bp)    # Insert end of string indicator (0)    
+    movw    number(%bp), %ax
+	
+getdigit:
+	xor		%dx, %dx                # Divide number by base
+	movw	base(%bp), %cx
+	div		%cx
+    movw    %dx, %di                # Convert remainder to hex character
+    movb    HexChars(%di), %dl      # and stpre in buffer
+	movb	%dl, (%si)
+	dec		%si
+	cmpw	$0, %ax                 # Have we extracted all digits?
+	jne		getdigit
+	inc		%si
+	call	cons_write              # Output the string
+
+    popw    %di                     # Restore the registers
+    popw    %si
+    popw    %dx
+    popw    %cx
+    popw    %bx
+    popw    %ax
+    movw    %bp, %sp                # Delete the local variables
+    popw    %bp
+    ret     $4                      # Return, removing paramters from stack
+
+display_sector_number:
+    call    cons_write_crlf
+    movw    $display_contents_of_sector, %si
+    call    cons_write
+    movw    starting_sector, %ax
+    push    %ax
+    pushw   $10
+    call    cons_write_number
+    call    cons_write_crlf
     ret
 
+read_sector:
+    movb    $0x10, %ah                  # Reset disk system
+
+    movw    $disk_address_packet, %si   # Point SI to the disk address packet
+    movw    $1, 2(%si)                  # Read one sector (count = 1
+    movw    $0xD000, 4(%si)                # LBAhi = 0
+
+    movl    starting_sector, %eax
+    movl    %eax, 8(%si)                # LBA = starting_sector
+
+    movb    $0x42, %ah                    # Read disk sectors
+
+    int     $0x13
+    jc      read_failed
+
+    ret
 
 # Routine to wait for Enter key press
 wait_for_enter:
@@ -295,6 +355,7 @@ display_sector:
     movw    $0x0000, %cx        # Offset counter
     movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
     xor     %bx, %bx            # BX will count the number of lines displayed
+    call    display_sector_number
 
 display_outer_loop:
     call    display_offset      # Display the current offset
@@ -323,30 +384,19 @@ new_line:
     je      all_sectors_displayed  # If yes, go to end message
     jmp     display_outer_loop
 
-    # pusha                    # Save registers
-    # call wait_for_enter      # Wait for Enter key press
-    # popa                     # Restore registers
-    # xor %bx, %bx             # Reset line counter after Enter is pressed
-
 prompt_once:
     push    %si                  # Save SI, DI, and CX before the prompt
     push    %di
     push    %cx
     call    wait_for_enter      # Call the routine to prompt user
-    pop     %cx                  # Restore SI, DI, and CX after the prompt
+    pop     %cx                 # Restore SI, DI, and CX after the prompt
     pop     %di
     pop     %si
     jmp     display_outer_loop         # Continue with the display after prompt
 
-display_next:
-    cmp     $0x200, %cx          # Check if we've displayed all 512 bytes   --- CHECKS THAT ALL LINES HAVE BEEN DISPLAYED
-    jz      all_sectors_displayed
-    jmp     display_outer_loop
-
 all_sectors_displayed:          # ADD CHECK FOR IF THE NUMBER OF SECTORS HAS BEEN DISPLAYED
     movl    num_of_sectors, %ecx
     subl    $1, %ecx
-    # dec     %ecx
     movl    %ecx, num_of_sectors
     cmp     $0, num_of_sectors
     jne     move_on
@@ -363,9 +413,8 @@ move_on:
     jmp     display_outer_loop
     
     
-    
 done_display_sector:
-    movw   $sector_finsihed_prompt, %si
+    movw   $sector_finished_prompt, %si
     call   cons_writeline
     jmp    input_prompts
 
@@ -440,11 +489,19 @@ print_space:
     call    print_char
     ret
 
+invalid_sector:
+    movw    $invalid_sector_prompt, %si
+    call    cons_write_crlf
+    call    cons_writeline
+    jmp     input_prompts
 
 # Program data
 
 boot_device:
     .byte   0
+
+display_contents_of_sector:
+    .string "Displaying contents of sector: "
 
 boot_message:     
     .string "Boot Loader Stage 2 loaded"             
@@ -462,11 +519,11 @@ num_of_sectors_prompt:
 continue_prompt:
     .string "Press Enter to continue"
 
-sector_finsihed_prompt:
+sector_finished_prompt:
     .string "Fully read sector successfully!"
 
-# sector_to_read_prompt:
-#     .string "Enter sector number to read: (press enter to read sector 0)"
+invalid_sector_prompt:
+    .string "Invalid sector number!"
 
 num_sector_buffer:
     .space  5                    # Reserve 5 bytes for number of sector buffer
