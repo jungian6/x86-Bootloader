@@ -351,11 +351,13 @@ wait_for_enter:
 
 # Modify the display_sector routine to call wait_for_enter every 16 lines
 display_sector:
+    call    display_sector_number
     movw    $0xD000, %si        # Starting address of the sector
     movw    $0x0000, %cx        # Offset counter
     movw    %si, %di            # DI will be used to remember the start of the 16 bytes for ASCII display
     xor     %bx, %bx            # BX will count the number of lines displayed
-    call    display_sector_number
+    
+
 
 display_outer_loop:
     call    display_offset      # Display the current offset
