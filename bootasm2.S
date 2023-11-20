@@ -224,11 +224,11 @@ finish_sector_to_read:
 convert_num_of_sectors:
     movw    $num_sector_buffer, %si # Point SI to the start of the input buffer
 
-    xorl    %eax, %eax              # Clear EAX register to use for conversion
-    xorl    %ecx, %ecx              # Clear ECX register to use for conversion
+    xor    %ax, %ax              # Clear EAX register to use for conversion
+    xor    %cx, %cx              # Clear ECX register to use for conversion
 
     call    input_conversion_loop
-    movl    %eax, num_of_sectors    # Move the sector number to num_of_sectors
+    movw    %ax, num_of_sectors    # Move the sector number to num_of_sectors
 
     # If num_of_sectors is 0, call invalid_sector
     cmp     $0, num_of_sectors
@@ -239,11 +239,11 @@ convert_num_of_sectors:
 starting_sector_conversion:
     movw    $input_buffer, %si   # Point SI to the start of the input buffer
 
-    xorl    %eax, %eax           # Clear EAX register to use for conversion
-    xorl    %ecx, %ecx           # Clear ECX register to use for conversion
+    xor    %ax, %ax           # Clear EAX register to use for conversion
+    xor    %cx, %cx           # Clear ECX register to use for conversion
 
     call    input_conversion_loop
-    movl    %eax, starting_sector           # Move the sector number to starting_sector
+    movw    %ax, starting_sector           # Move the sector number to starting_sector
 
 input_conversion_loop:
     movb    (%si), %cl           # Move the first character to CL
@@ -252,8 +252,8 @@ input_conversion_loop:
     jz      sector_conversion_done # If so, we are done
 
     subb    $'0', %cl            # Convert the character to a number
-    imull   $10, %eax            # Multiply the current number by 10
-    addl    %ecx, %eax           # Add the current number to the total
+    imul    $10, %ax            # Multiply the current number by 10
+    add     %cx, %ax           # Add the current number to the total
     jmp     input_conversion_loop
 
 sector_conversion_done:
@@ -330,8 +330,8 @@ read_sector:
     movw    $1, 2(%si)                  # Read one sector (count = 1
     movw    $0xD000, 4(%si)                # LBAhi = 0
 
-    movl    starting_sector, %eax
-    movl    %eax, 8(%si)                # LBA = starting_sector
+    movw    starting_sector, %ax
+    movw    %ax, 8(%si)                # LBA = starting_sector
 
     movb    $0x42, %ah                    # Read disk sectors
 
@@ -400,9 +400,9 @@ prompt_once:
     jmp     display_outer_loop         # Continue with the display after prompt
 
 all_sectors_displayed:          # ADD CHECK FOR IF THE NUMBER OF SECTORS HAS BEEN DISPLAYED
-    movl    num_of_sectors, %ecx
-    subl    $1, %ecx
-    movl    %ecx, num_of_sectors
+    mov     num_of_sectors, %cx
+    subw    $1, %cx
+    mov     %cx, num_of_sectors
     cmp     $0, num_of_sectors
     jne     move_on
 
