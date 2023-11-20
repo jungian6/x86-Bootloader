@@ -196,6 +196,9 @@ backspace_handling:
     cmp     $input_buffer, %bx
     je      inputs_handling         # If at start, no backspace handling
 
+    cmp $num_sector_buffer, %bx
+    je      inputs_handling         # If at start, no backspace handling
+
     # Move the cursor back
     movb    $0x08, %al              # Load backspace character into AL
     movb    $0x0E, %ah              # Teletype output function
