@@ -219,6 +219,8 @@ backspace_handling:
     jmp     inputs_handling
 
 finish_sector_to_read:
+    cmp     $0, %cx                 # Check if no characters have been entered
+    jz     invalid_sector         # If so, wait for another character
     ret
 
 convert_num_of_sectors:
